@@ -89,9 +89,10 @@ def reverse_hexdigits(packedstring):
 def ip2asn(res, address):
     """
     TXT records queried return single strings of the form:
-    ASN | IPprefix | CountryCode | RIR | date, e.g.
+    ASorigin(s) | IPprefix | CountryCode | RIR | date, e.g.
     '55 | 128.91.0.0/16 | US | arin | '
     '55 | 2607:f470::/32 | US | arin | 2008-05-01'
+    '36617 36619 36620 36625 | 192.5.6.0/24 | US | arin | 2000-11-30'
     """
     qname = None
     try:
@@ -110,13 +111,17 @@ def ip2asn(res, address):
 
     txt_rrset = do_query(res, qname, 'TXT')
     if txt_rrset:
-        return "AS" + txt_rrset[0].strings[0].split('|')[0].rstrip(' ')
+        rdata = txt_rrset[0].strings[0]
+        origins, prefix, country, rir, year = rdata.split('|')
+        origins = "AS[" + origins + "]"
+        return origins
     else:
         return None
 
 
 def ip2name(res, address):
-    ptr_rrset = do_query(res, dns.reversename.from_address(address), 'PTR')
+    ptr_rrset = do_query(res, dns.reversename.from_address(address), 'PTR',
+                         quiet_notfound=True)
     if ptr_rrset:
         return ptr_rrset[0].target
     else:

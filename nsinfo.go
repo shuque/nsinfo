@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"fmt"
 	"strings"
@@ -24,7 +25,7 @@ func mk_fqdn(qname string) (string) {
 }
 
 
-func do_query(qname, qtype string) (response *dns.Msg) {
+func do_query(qname, qtype string) (response *dns.Msg, err error) {
 
 	m := new(dns.Msg)
 	m.Id = dns.Id()
@@ -33,27 +34,23 @@ func do_query(qname, qtype string) (response *dns.Msg) {
 	m.Question = make([]dns.Question, 1)
 	qtype_int, ok := dns.StringToType[qtype]
 	if !ok {
-		fmt.Printf("%s: Unrecognized query type.\n", qtype)
-		return nil
+		return nil, errors.New(fmt.Sprintf("%s: Unrecognized query type.\n", qtype))
 	}
 	m.Question[0] = dns.Question{qname, qtype_int, dns.ClassINET}
 
 	c := new(dns.Client)
-	response, _, err := c.Exchange(m, "127.0.0.1:53")
+	response, _, err = c.Exchange(m, "127.0.0.1:53")
 	if err != nil {
-		fmt.Printf("DNS query failed %s\n", err);
-		return nil
+		return nil, err
 	}
 	switch response.MsgHdr.Rcode {
 	case dns.RcodeSuccess:
 		break
 	case dns.RcodeNameError:
-		fmt.Printf("NXDOMAIN: %s: name doesn't exist\n", qname)
-		return nil
+		return nil, errors.New(fmt.Sprintf("NXDOMAIN: %s: name doesn't exist\n", qname))
 	default:
-		fmt.Printf("Error: Response code: %s\n", 
-			dns.RcodeToString[response.MsgHdr.Rcode])
-		return nil
+		return nil, errors.New(fmt.Sprintf("Error: Response code: %s\n", 
+			dns.RcodeToString[response.MsgHdr.Rcode]))
 	}
 
 	var rrcount int
@@ -63,11 +60,11 @@ func do_query(qname, qtype string) (response *dns.Msg) {
 		}
         }
 	if rrcount == 0 {
-		/* fmt.Printf("NODATA: %s/%s\n", qname, qtype) */
-		return nil
+		return nil, errors.New(fmt.Sprintf("NODATA: %s/%s\n", qname, qtype))
+
 	}
 
-	return response
+	return response, err
 }
 
 
@@ -80,8 +77,8 @@ func getIPAddresses(hostname, rrtype string) ([]net.IP) {
 	switch rrtype {
 
 	case "AAAA":
-		response := do_query(hostname, rrtype)
-		if response != nil {
+		response, err := do_query(hostname, rrtype)
+		if err == nil && response != nil {
 			for _, rr := range response.Answer {
 				if rr.Header().Rrtype == dns.TypeAAAA {
 					aaaa_rr = rr.(*dns.AAAA)
@@ -91,8 +88,8 @@ func getIPAddresses(hostname, rrtype string) ([]net.IP) {
 		
 		}
 	case "A":
-		response := do_query(hostname, rrtype)
-		if response != nil {
+		response, err := do_query(hostname, rrtype)
+		if err == nil && response != nil {
 			for _, rr := range response.Answer {
 				if rr.Header().Rrtype == dns.TypeA {
 					a_rr = rr.(*dns.A)
@@ -116,12 +113,12 @@ func reverseLookup(ipaddr net.IP) (string) {
 	if err != nil {
 		return ""
 	}
-	response := do_query(arpaname, "PTR")
+	response, err := do_query(arpaname, "PTR")
 	if response == nil {
-		return ""
+		return "NO-PTR"
 	}
 	if len(response.Answer) < 1 {
-		return ""
+		return "NO-PTR"
 	}
 	ptr_rr := response.Answer[0].(*dns.PTR)
 	return ptr_rr.Ptr
@@ -159,14 +156,14 @@ func ip2asn(ip net.IP) (string) {
 		qname = string(buf6) + ip2asnSuffixV6
 	}
 
-	response := do_query(qname, "TXT")
+	response, _ := do_query(qname, "TXT")
 	if response == nil {
 		fmt.Printf("No ASN found\n")
 		return ""
 	}
 
-        txt_rr := response.Answer[0].(*dns.TXT)
-	return "AS" + strings.Split(txt_rr.Txt[0], " ")[0]
+	txt_rr := response.Answer[0].(*dns.TXT)
+	return "AS[" + strings.TrimSuffix(strings.Split(txt_rr.Txt[0], "|")[0], " ") + "]"
 
 }
 
@@ -178,7 +175,7 @@ func main() {
 		return
 	}
 	zone := mk_fqdn(os.Args[1])
-	response := do_query(zone, "NS")
+	response, _ := do_query(zone, "NS")
 	if response == nil {
 		return
 	}
