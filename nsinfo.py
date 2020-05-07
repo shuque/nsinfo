@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 
 """
@@ -111,8 +111,9 @@ def ip2asn(res, address):
 
     txt_rrset = do_query(res, qname, 'TXT')
     if txt_rrset:
-        rdata = txt_rrset[0].strings[0]
+        rdata = txt_rrset[0].strings[0].decode()
         origins, prefix, country, rir, year = rdata.split('|')
+        origins = origins.rstrip()
         origins = "AS[" + origins + "]"
         return origins
     else:
