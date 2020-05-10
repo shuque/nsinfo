@@ -66,30 +66,20 @@ func do_query(qname string, qtype uint16) (response *dns.Msg, err error) {
 
 func getIPAddresses(hostname string, rrtype uint16) ([]net.IP) {
 
-	var a_rr *dns.A
-	var aaaa_rr *dns.AAAA
 	var ip_list []net.IP
 
 	switch rrtype {
 
-	case dns.TypeAAAA:
+	case dns.TypeAAAA, dns.TypeA:
 		response, err := do_query(hostname, rrtype)
 		if err == nil && response != nil {
 			for _, rr := range response.Answer {
-				if rr.Header().Rrtype == dns.TypeAAAA {
-					aaaa_rr = rr.(*dns.AAAA)
-					ip_list = append(ip_list, aaaa_rr.AAAA)
-				}
-			}
-		
-		}
-	case dns.TypeA:
-		response, err := do_query(hostname, rrtype)
-		if err == nil && response != nil {
-			for _, rr := range response.Answer {
-				if rr.Header().Rrtype == dns.TypeA {
-					a_rr = rr.(*dns.A)
-					ip_list = append(ip_list, a_rr.A)
+				if rr.Header().Rrtype == rrtype {
+					if rrtype == dns.TypeAAAA {
+						ip_list = append(ip_list, rr.(*dns.AAAA).AAAA)
+					} else if rrtype == dns.TypeA {
+						ip_list = append(ip_list, rr.(*dns.A).A)
+					}
 				}
 			}
 		
