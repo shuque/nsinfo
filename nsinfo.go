@@ -1,38 +1,34 @@
 package main
 
 import (
-	"errors"
-	"os"
 	"fmt"
-	"strings"
 	"net"
+	"os"
 	"sort"
+	"strings"
+
 	"github.com/miekg/dns"
 )
-
 
 func usage() {
 	fmt.Printf("Usage: nsinfo <zonename>\n")
 }
 
-
-func mk_fqdn(qname string) (string) {
+func mkFqdn(qname string) string {
 	if strings.HasSuffix(qname, ".") {
 		return qname
-	} else {
-		return qname + "."
 	}
+	return qname + "."
 }
 
-
-func do_query(qname string, qtype uint16) (response *dns.Msg, err error) {
+func doQuery(qname string, qtype uint16) (response *dns.Msg, err error) {
 
 	m := new(dns.Msg)
 	m.Id = dns.Id()
 	m.RecursionDesired = true
 	// m.SetEdns0(4096, true)
 	m.Question = make([]dns.Question, 1)
-	m.Question[0] = dns.Question{qname, qtype, dns.ClassINET}
+	m.Question[0] = dns.Question{Name: qname, Qtype: qtype, Qclass: dns.ClassINET}
 
 	c := new(dns.Client)
 	response, _, err = c.Exchange(m, "127.0.0.1:53")
@@ -43,79 +39,79 @@ func do_query(qname string, qtype uint16) (response *dns.Msg, err error) {
 	case dns.RcodeSuccess:
 		break
 	case dns.RcodeNameError:
-		return nil, errors.New(fmt.Sprintf("NXDOMAIN: %s: name doesn't exist\n", qname))
+		return nil, fmt.Errorf("NXDOMAIN: %s doesn't exist", qname)
 	default:
-		return nil, errors.New(fmt.Sprintf("Error: Response code: %s\n", 
-			dns.RcodeToString[response.MsgHdr.Rcode]))
+		return nil, fmt.Errorf("Error: Response code: %s",
+			dns.RcodeToString[response.MsgHdr.Rcode])
 	}
 
 	var rrcount int
 	for _, rr := range response.Answer {
 		if rr.Header().Rrtype == qtype {
-			rrcount += 1
+			rrcount++
 		}
-        }
+	}
 	if rrcount == 0 {
-		return nil, errors.New(fmt.Sprintf("NODATA: %s/%s\n", qname, qtype))
+		return nil, fmt.Errorf("NODATA: %s/%d", qname, qtype)
 
 	}
 
 	return response, err
 }
 
+func getIPAddresses(hostname string) []net.IP {
 
-func getIPAddresses(hostname string, rrtype uint16) ([]net.IP) {
+	var ipList []net.IP
 
-	var ip_list []net.IP
-
-	switch rrtype {
-
-	case dns.TypeAAAA, dns.TypeA:
-		response, err := do_query(hostname, rrtype)
-		if err == nil && response != nil {
-			for _, rr := range response.Answer {
-				if rr.Header().Rrtype == rrtype {
-					if rrtype == dns.TypeAAAA {
-						ip_list = append(ip_list, rr.(*dns.AAAA).AAAA)
-					} else if rrtype == dns.TypeA {
-						ip_list = append(ip_list, rr.(*dns.A).A)
-					}
-				}
-			}
-		
-		}
-	default:
-		fmt.Printf("getIPAddresses: %d: invalid rrtype\n", rrtype)
+	var rrTypes = []uint16{
+		dns.TypeAAAA,
+		dns.TypeA,
 	}
 
-	return ip_list
+	for _, rrtype := range rrTypes {
+
+		response, err := doQuery(hostname, rrtype)
+		if err != nil {
+			break
+		}
+		if response == nil {
+			break
+		}
+		for _, rr := range response.Answer {
+			if rr.Header().Rrtype == rrtype {
+				if rrtype == dns.TypeAAAA {
+					ipList = append(ipList, rr.(*dns.AAAA).AAAA)
+				} else if rrtype == dns.TypeA {
+					ipList = append(ipList, rr.(*dns.A).A)
+				}
+			}
+		}
+	}
+
+	return ipList
 
 }
 
-
-func reverseLookup(ipaddr net.IP) (string) {
+func reverseLookup(ipaddr net.IP) string {
 
 	arpaname, err := dns.ReverseAddr(ipaddr.String())
 	if err != nil {
 		return ""
 	}
-	response, err := do_query(arpaname, dns.TypePTR)
-	if response == nil {
+	response, err := doQuery(arpaname, dns.TypePTR)
+	if err != nil || response == nil || len(response.Answer) < 1 {
 		return "NO-PTR"
 	}
-	if len(response.Answer) < 1 {
-		return "NO-PTR"
-	}
-	ptr_rr := response.Answer[0].(*dns.PTR)
-	return ptr_rr.Ptr
+	ptrRr := response.Answer[0].(*dns.PTR)
+	return ptrRr.Ptr
 }
 
-
 const hexDigit = "0123456789abcdef"
+
 var ip2asnSuffixV4 = "origin.asn.cymru.com."
 var ip2asnSuffixV6 = "origin6.asn.cymru.com."
 
-func ip2asn(ip net.IP) (string) {
+func ip2asn(ip net.IP) string {
 
 	var h1, h2 byte
 	var qname string
@@ -131,7 +127,7 @@ func ip2asn(ip net.IP) (string) {
 	} else {
 		// IPv6 address
 		buf6 := make([]byte, 0, len(ip)*4)
-		for i := len(ip)-1; i >= 0; i-- {
+		for i := len(ip) - 1; i >= 0; i-- {
 			h1 = ip[i] & 0xf
 			h2 = ip[i] >> 4
 			buf6 = append(buf6, hexDigit[h1])
@@ -142,61 +138,58 @@ func ip2asn(ip net.IP) (string) {
 		qname = string(buf6) + ip2asnSuffixV6
 	}
 
-	response, _ := do_query(qname, dns.TypeTXT)
+	response, _ := doQuery(qname, dns.TypeTXT)
 	if response == nil {
 		fmt.Printf("No ASN found\n")
 		return ""
 	}
 
-	txt_rr := response.Answer[0].(*dns.TXT)
-	return "AS[" + strings.TrimSuffix(strings.Split(txt_rr.Txt[0], "|")[0], " ") + "]"
+	txtRr := response.Answer[0].(*dns.TXT)
+	return "AS[" + strings.TrimSuffix(strings.Split(txtRr.Txt[0], "|")[0], " ") + "]"
 
 }
 
-
 func main() {
+
+	var err error
 
 	if len(os.Args) != 2 {
 		usage()
 		return
 	}
-	zone := mk_fqdn(os.Args[1])
-	response, _ := do_query(zone, dns.TypeNS)
+	zone := mkFqdn(os.Args[1])
+
+	response, err := doQuery(zone, dns.TypeNS)
+	if err != nil {
+		fmt.Printf("%s\n", err.Error())
+		return
+	}
 	if response == nil {
+		fmt.Printf("Error: null DNS response to NS query")
 		return
 	}
 
-	var ns_rr *dns.NS
-	var ns_name_list []string
+	var nsRr *dns.NS
+	var nsNames []string
 
 	for _, rr := range response.Answer {
 		if rr.Header().Rrtype == dns.TypeNS {
-			ns_rr = rr.(*dns.NS)
-			ns_name_list = append(ns_name_list, ns_rr.Ns)
+			nsRr = rr.(*dns.NS)
+			nsNames = append(nsNames, nsRr.Ns)
 		}
 	}
 
-	// should really be sorting in DNS canonical order here .. //
-	sort.Strings(ns_name_list)
+	// TODO: sort this in DNS canonical order
+	sort.Strings(nsNames)
 
-	var v4_list []net.IP
-	var v6_list []net.IP
+	var ipList []net.IP
 
-	for _, ns_name := range ns_name_list {
-		v4_list = nil
-		v6_list = nil
-
-		v6_list = getIPAddresses(ns_name, dns.TypeAAAA)
-		for _, ip := range v6_list {
-			fmt.Printf("%s %s %s %s\n", ns_name, ip, ip2asn(ip), reverseLookup(ip))
+	for _, nsName := range nsNames {
+		ipList = getIPAddresses(nsName)
+		for _, ip := range ipList {
+			fmt.Printf("%s %s %s %s\n", nsName, ip, ip2asn(ip),
+				reverseLookup(ip))
 		}
-
-
-		v4_list = getIPAddresses(ns_name, dns.TypeA)
-		for _, ip := range v4_list {
-			fmt.Printf("%s %s %s %s\n", ns_name, ip, ip2asn(ip), reverseLookup(ip))
-		}
-
 	}
 
 }
