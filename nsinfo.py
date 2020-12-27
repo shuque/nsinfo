@@ -57,7 +57,7 @@ def do_query(r, qname, qtype, qclass='IN', quiet_notfound=False):
     """Perform DNS query and return answer RRset object"""
     response = None
     try:
-        answers = r.query(qname, qtype, qclass)
+        answers = r.resolve(qname, qtype, qclass)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
         if not quiet_notfound:
             print("{}/{}/{}: No records found.".format(qname, qtype, qclass))
